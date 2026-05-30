@@ -1,0 +1,20 @@
+@import "tailwindcss";
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+}
+
+/* Syntax highlight tokens */
+.hl-keyword  { color: #cba6f7; }
+.hl-literal  { color: #f38ba8; }
+.hl-string   { color: #a6e3a1; }
+.hl-number   { color: #fab387; }
+.hl-comment  { color: #6c7086; font-style: italic; }
+.hl-builtin  { color: #89b4fa; }
+.hl-function { color: #89dceb; }
