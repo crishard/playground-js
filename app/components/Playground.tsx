@@ -268,7 +268,6 @@ export default function Playground() {
   return (
     <div
       className="flex flex-col h-full bg-[#0f0f14] text-slate-200"
-      style={{ padding: "0 24px" }}
       onMouseUp={onDragEnd}
       onMouseLeave={onDragEnd}
     >
