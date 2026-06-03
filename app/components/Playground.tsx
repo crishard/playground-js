@@ -155,7 +155,7 @@ const LOG_STYLE: Record<LogType, string> = {
 };
 
 const EDITOR_FONT = "var(--font-mono), 'Fira Code', Consolas, monospace";
-const EDITOR_STYLE = { fontFamily: EDITOR_FONT, fontSize: 15, lineHeight: "1.7" };
+const EDITOR_STYLE = { fontFamily: EDITOR_FONT, fontSize: 15, lineHeight: "1.7", fontVariantLigatures: "none" as const };
 const PAD = { padding: "16px 20px" };
 
 const MIN_PCT = 15;
@@ -173,6 +173,24 @@ export default function Playground() {
   const preRef      = useRef<HTMLPreElement>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const dragging    = useRef(false);
+
+  const historyRef  = useRef([{ code: PLACEHOLDER, start: 0, end: 0 }]);
+  const histIdxRef  = useRef(0);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── history ──
+  function pushSnap(code: string, start: number, end: number) {
+    const h = historyRef.current.slice(0, histIdxRef.current + 1);
+    if (h[h.length - 1]?.code === code) return;
+    h.push({ code, start, end });
+    historyRef.current = h;
+    histIdxRef.current = h.length - 1;
+  }
+
+  function scheduleSnap(code: string, start: number, end: number) {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => pushSnap(code, start, end), 400);
+  }
 
   // ── run ──
   function run() {
@@ -227,10 +245,75 @@ export default function Playground() {
       e.preventDefault(); run(); return;
     }
 
+    if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+      e.preventDefault();
+      if (debounceRef.current) { clearTimeout(debounceRef.current); debounceRef.current = null; }
+      pushSnap(val, start, end);
+      if (histIdxRef.current > 0) {
+        histIdxRef.current--;
+        const prev = historyRef.current[histIdxRef.current];
+        setCode(prev.code);
+        requestAnimationFrame(() => {
+          if (taRef.current) { taRef.current.selectionStart = prev.start; taRef.current.selectionEnd = prev.end; }
+        });
+      }
+      return;
+    }
+
+    if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) {
+      e.preventDefault();
+      if (histIdxRef.current < historyRef.current.length - 1) {
+        histIdxRef.current++;
+        const next = historyRef.current[histIdxRef.current];
+        setCode(next.code);
+        requestAnimationFrame(() => {
+          if (taRef.current) { taRef.current.selectionStart = next.start; taRef.current.selectionEnd = next.end; }
+        });
+      }
+      return;
+    }
+
+    if (e.key === "Enter") {
+      e.preventDefault();
+      pushSnap(val, start, end);
+      const lineStart = val.lastIndexOf("\n", start - 1) + 1;
+      const indent = val.slice(lineStart, start).match(/^(\s*)/)?.[1] ?? "";
+      const charBefore = val[start - 1];
+      const charAfter  = val[start];
+      const OPENERS: Record<string, string> = { "{": "}", "[": "]", "(": ")" };
+      if (OPENERS[charBefore] && charAfter === OPENERS[charBefore]) {
+        const newCode = val.slice(0, start) + "\n" + indent + "  " + "\n" + indent + val.slice(end);
+        setCode(newCode);
+        requestAnimationFrame(() => {
+          ta.selectionStart = ta.selectionEnd = start + 1 + indent.length + 2;
+        });
+      } else {
+        const newCode = val.slice(0, start) + "\n" + indent + val.slice(end);
+        setCode(newCode);
+        requestAnimationFrame(() => {
+          ta.selectionStart = ta.selectionEnd = start + 1 + indent.length;
+        });
+      }
+      return;
+    }
+
     if (e.key === "Tab") {
       e.preventDefault();
-      setCode(val.slice(0, start) + "  " + val.slice(end));
-      requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = start + 2; });
+      pushSnap(val, start, end);
+      if (e.shiftKey) {
+        const lineStart = val.lastIndexOf("\n", start - 1) + 1;
+        const remove = val.slice(lineStart, lineStart + 2) === "  " ? 2
+                     : val[lineStart] === " " ? 1 : 0;
+        if (remove > 0) {
+          setCode(val.slice(0, lineStart) + val.slice(lineStart + remove));
+          requestAnimationFrame(() => {
+            ta.selectionStart = ta.selectionEnd = Math.max(lineStart, start - remove);
+          });
+        }
+      } else {
+        setCode(val.slice(0, start) + "  " + val.slice(end));
+        requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = start + 2; });
+      }
       return;
     }
 
@@ -243,6 +326,7 @@ export default function Playground() {
 
     if (PAIRS[e.key]) {
       e.preventDefault();
+      pushSnap(val, start, end);
       const close    = PAIRS[e.key];
       const selected = val.slice(start, end);
       const insert   = e.key + selected + close;
@@ -258,8 +342,19 @@ export default function Playground() {
       const before = val[start - 1], after = val[start];
       if (PAIRS[before] && PAIRS[before] === after) {
         e.preventDefault();
+        pushSnap(val, start, end);
         setCode(val.slice(0, start - 1) + val.slice(start + 1));
         requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = start - 1; });
+        return;
+      }
+      const lineStart = val.lastIndexOf("\n", start - 1) + 1;
+      const beforeCursor = val.slice(lineStart, start);
+      if (beforeCursor.length > 0 && /^ +$/.test(beforeCursor)) {
+        e.preventDefault();
+        pushSnap(val, start, end);
+        const remove = beforeCursor.length % 2 === 0 ? 2 : 1;
+        setCode(val.slice(0, start - remove) + val.slice(start));
+        requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = start - remove; });
       }
     }
   }
@@ -344,7 +439,11 @@ export default function Playground() {
                 whiteSpace: "pre-wrap", wordBreak: "break-all",
               }}
               value={code}
-              onChange={(e) => setCode(e.target.value)}
+              onChange={(e) => {
+                const newCode = e.target.value;
+                setCode(newCode);
+                scheduleSnap(newCode, e.target.selectionStart ?? 0, e.target.selectionEnd ?? 0);
+              }}
               onKeyDown={handleKeyDown}
               onScroll={syncScroll}
               spellCheck={false}
